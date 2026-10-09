@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>MeshToCAD</name>
+  <description>Bring a mesh in (scan, download, or AI-generated) and run the
+  mesh-to-cad pipeline from inside FreeCAD: intake with units check, quality
+  gate, geometry analysis, and deviation checking. Honest about what it can't
+  do — no magic scan-to-CAD button.</description>
+  <version>0.1.0</version>
+  <date>2026-10-09</date>
+  <maintainer>GruntAndMuse</maintainer>
+  <license>MIT</license>
+  <url type="repository" branch="main">https://github.com/GruntAndMuse/freecad-meshtocad</url>
+  <url type="readme">https://github.com/GruntAndMuse/freecad-meshtocad/blob/main/README.md</url>
+  <tag>mesh</tag>
+  <tag>reverse-engineering</tag>
+  <tag>3d-scan</tag>
+  <content>
+    <workbench>
+      <classname>MeshToCADWorkbench</classname>
+      <subdirectory>./</subdirectory>
+    </workbench>
+  </content>
+</package>
