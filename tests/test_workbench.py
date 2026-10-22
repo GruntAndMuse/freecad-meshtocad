@@ -132,6 +132,121 @@ def main():
               reloaded and reloaded["track"] == "prismatic"
               and project.stage_done(reloaded, "analyze"))
 
+        # 4b. Post-MVP stages: guidance -> verify -> export (the same
+        # functions the panels call; panels themselves are GUI-tested).
+        from meshtocad import exporting, guidance, verification
+        from meshtocad.framework import freecad_io
+        from meshtocad.framework.exporting import plan_exports
+
+        check("stage list is the full pipeline",
+              project.STAGES == ("import", "quality", "analyze", "rebuild",
+                                 "deviation", "verify", "export"))
+        old = {"stages": {"import": True}}  # a 0.1.0-era manifest
+        check("old manifest: new stages read as not-done",
+              not project.stage_done(old, "verify"))
+        project.mark_stage(old, "verify", True)
+        check("old manifest: mark_stage accepts new stages",
+              project.stage_done(old, "verify"))
+
+        # The panel's Analyze stage writes the measurements JSON — mirror
+        # that here so guidance/verify read the real file layout.
+        import json as _json
+        meas_path = (Path(manifest["project_dir"]) / "analysis"
+                     / f"{sample.stem}_measurements.json")
+        meas_path.write_text(_json.dumps(result, indent=2),
+                             encoding="utf-8")
+
+        ref = guidance.build_reference(manifest["project_dir"])
+        check("guidance reference built", ref["error"] is None,
+              str(ref["error"]))
+        if ref["error"] is None:
+            ref_text = Path(ref["reference_path"]).read_text(
+                encoding="utf-8")
+            check("guidance reference has checklist + numbers",
+                  "## Rebuild checklist" in ref_text
+                  and "Overall width (X)" in ref_text)
+            project.mark_stage(manifest, "rebuild", True)
+
+        # A real CAD solid with exactly the measured extents.
+        doc = FreeCAD.newDocument("verify_test")
+        box = doc.addObject("Part::Box", "Model")
+        ext = result["bounding_box_mm"]["extents"]
+        box.Length, box.Width, box.Height = ext[0], ext[1], ext[2]
+        doc.recompute()
+        summary = freecad_io.shape_summary(box)
+        check("shape_summary extents match the box",
+              summary and summary["extents_mm"] == [round(float(v), 4)
+                                                    for v in ext])
+        geom = freecad_io.geometry_check(box.Shape)
+        check("geometry check: box valid + closed, no problems",
+              geom["ran"] and geom["valid"] and geom["closed"]
+              and not geom["problems"], str(geom))
+
+        vres = verification.run_verification(manifest, summary, geom,
+                                             0.3, 0.1)
+        check("verification report written", vres["error"] is None,
+              str(vres["error"]))
+        if vres["error"] is None:
+            rows = {r["name"]: r["status"]
+                    for r in vres["report"]["dimension_rows"]}
+            check("verification: XYZ dimensions pass on exact box",
+                  all(rows.get(f"Overall size {a}") == "pass"
+                      for a in "XYZ"), str(rows))
+            check("verification report file exists",
+                  Path(vres["path"]).is_file())
+            # With deviation on record + matching volume -> PASS verdict.
+            manifest["deviation"] = {"max_mm": 0.2, "mean_mm": 0.05,
+                                      "p95_mm": 0.15, "tolerance_mm": 0.3,
+                                      "passed": True}
+            exact = dict(summary)
+            exact["volume_mm3"] = result["volume_mm3"]
+            vres2 = verification.run_verification(manifest, exact, geom,
+                                                  0.3, 0.1)
+            check("verification: full pass when every check passes",
+                  vres2["error"] is None
+                  and vres2["report"]["verdict"] == "pass",
+                  str(vres2.get("report", {}).get("summary")))
+            if vres2["error"] is None:
+                manifest["verification"] = vres2["report"]["summary"]
+            project.mark_stage(manifest, "verify", True)
+
+        # Export: plan from real document descriptors, write real files.
+        descriptors = freecad_io.object_descriptors(doc)
+        plan = plan_exports(exporting.SPEC.formats, descriptors,
+                            ["step", "stl", "fcstd"], manifest["project"])
+        check("export plan: 3 jobs, no skips",
+              len(plan["jobs"]) == 3 and plan["skipped"] == [],
+              str(plan))
+        out_dir = Path(manifest["project_dir"]) / "output"
+        written = []
+        export_err = ""
+        for job in plan["jobs"]:
+            try:
+                written.append(freecad_io.export_job(doc, job, out_dir))
+            except Exception as e:
+                export_err = f"{job['format']}: {e}"
+        check("export writes STEP/STL/FCStd files",
+              len(written) == 3
+              and all(p.is_file() and p.stat().st_size > 0
+                      for p in written), export_err)
+        # Drawing PDF in console mode must degrade LOUDLY (TechDrawGui is
+        # GUI-only) — a clear RuntimeError, never a silent success.
+        plan_pdf = plan_exports(exporting.SPEC.formats, descriptors,
+                                ["drawing-pdf"], manifest["project"])
+        if plan_pdf["jobs"]:
+            try:
+                p = freecad_io.export_job(doc, plan_pdf["jobs"][0], out_dir)
+                check("drawing export (GUI path available)", p.is_file())
+            except RuntimeError as e:
+                check("drawing export degrades loudly headless",
+                      "GUI" in str(e), str(e))
+        project.mark_stage(manifest, "export", True)
+        project.save_manifest(manifest["project_dir"], manifest)
+        reloaded2 = project.load_manifest(manifest["project_dir"])
+        check("post-MVP stages round-trip",
+              all(project.stage_done(reloaded2, s)
+                  for s in ("rebuild", "verify", "export")))
+
     # 5. AI source type accepted (red-pen decision #6)
     try:
         m2 = project.create_project(sample, tmp, "ai-generated")
@@ -147,10 +262,20 @@ def main():
         _WB_ROOT / "meshtocad" / "workbench.py",
         _WB_ROOT / "meshtocad" / "threads.py",
         _WB_ROOT / "meshtocad" / "ui" / "panels.py",
+        _WB_ROOT / "meshtocad" / "guidance.py",
+        _WB_ROOT / "meshtocad" / "verification.py",
+        _WB_ROOT / "meshtocad" / "exporting.py",
+        _WB_ROOT / "meshtocad" / "framework" / "guidance.py",
+        _WB_ROOT / "meshtocad" / "framework" / "verification.py",
+        _WB_ROOT / "meshtocad" / "framework" / "exporting.py",
+        _WB_ROOT / "meshtocad" / "framework" / "freecad_io.py",
         _WB_ROOT / "meshtocad" / "commands" / "cmd_import.py",
         _WB_ROOT / "meshtocad" / "commands" / "cmd_quality.py",
         _WB_ROOT / "meshtocad" / "commands" / "cmd_analyze.py",
+        _WB_ROOT / "meshtocad" / "commands" / "cmd_rebuild.py",
         _WB_ROOT / "meshtocad" / "commands" / "cmd_deviation.py",
+        _WB_ROOT / "meshtocad" / "commands" / "cmd_verify.py",
+        _WB_ROOT / "meshtocad" / "commands" / "cmd_export.py",
     ]
     compile_ok = True
     for f in gui_files:

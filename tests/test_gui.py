@@ -44,6 +44,26 @@ def finish():
         open("/tmp/guitest_failed.txt", "w").write("\n".join(
             r[0] for r in failed))
     print("GUI TEST DONE", flush=True)
+    # The results ALSO go to a file: _shutdown() exits via os._exit,
+    # which bypasses FreeCAD's C-level stdout flush — a full pass once
+    # exited 0 with an empty log (2026-10-21). Files don't get lost.
+    lines = [("ok - " if ok else "FAIL - ") + name
+             for name, ok, _ in RESULTS]
+    lines.append(f"{len(RESULTS) - len(failed)}/{len(RESULTS)} "
+                 "GUI checks passed")
+    lines.append("GUI TEST DONE")
+    open("/tmp/guitest_results.txt", "w").write("\n".join(lines) + "\n")
+
+
+def _shutdown():
+    # QApplication.quit() is NOT reliable in this harness: with modified
+    # documents open it can sit indefinitely (a rerun hung >6 minutes
+    # after a 29/29 pass on 2026-10-21; the run before only exited
+    # because a stray timer fired quit a second time). Results are
+    # already printed and the failure file written by finish() — exit
+    # deterministically, with the verdict as the exit code.
+    sys.stdout.flush()
+    os._exit(1 if any(not r[1] for r in RESULTS) else 0)
 
 
 try:
@@ -56,19 +76,24 @@ try:
     wb = FreeCADGui.getWorkbench("MeshToCADWorkbench")
     check("workbench registered", wb is not None)
 
-    # 2. Full activation lifecycle, then the four commands exist
+    # 2. Full activation lifecycle, then the seven commands exist
     FreeCADGui.activateWorkbench("MeshToCADWorkbench")
-    for cmd in ("MTC_Import", "MTC_Quality", "MTC_Analyze", "MTC_Deviation"):
+    for cmd in ("MTC_Import", "MTC_Quality", "MTC_Analyze", "MTC_Rebuild",
+                "MTC_Deviation", "MTC_Verify", "MTC_Export"):
         check(f"command {cmd} registered",
               cmd in FreeCADGui.listCommands())
 
     # 3. Task panels construct without errors
     from meshtocad.commands.cmd_analyze import AnalyzePanel
     from meshtocad.commands.cmd_deviation import DeviationPanel
+    from meshtocad.commands.cmd_export import ExportPanel
     from meshtocad.commands.cmd_import import ImportPanel
     from meshtocad.commands.cmd_quality import QualityPanel
+    from meshtocad.commands.cmd_rebuild import RebuildPanel
+    from meshtocad.commands.cmd_verify import VerifyPanel
 
-    for cls in (ImportPanel, QualityPanel, AnalyzePanel, DeviationPanel):
+    for cls in (ImportPanel, QualityPanel, AnalyzePanel, RebuildPanel,
+                DeviationPanel, VerifyPanel, ExportPanel):
         try:
             panel = cls()
             check(f"{cls.__name__} constructs", True)
@@ -87,6 +112,29 @@ try:
     else:
         print("(cloudcompare found — skipping loud-degradation check)",
               flush=True)
+
+    # 4b. TechDraw drawing + PDF export — a GUI-only capability, verified
+    # here (in freecadcmd it must degrade loudly instead; test_workbench.py
+    # covers that side).
+    try:
+        import tempfile
+
+        import FreeCAD
+        from meshtocad.framework import freecad_io
+
+        doc = FreeCAD.newDocument("drawing_test")
+        dbox = doc.addObject("Part::Box", "Model")
+        dbox.Length, dbox.Width, dbox.Height = 40, 20, 10
+        doc.recompute()
+        page = freecad_io.build_drawing_page(doc, dbox)
+        check("drawing page built with views",
+              page is not None and len(page.Views or []) >= 1)
+        pdf_path = os.path.join(tempfile.mkdtemp(), "drawing.pdf")
+        freecad_io.export_page_pdf(page, pdf_path)
+        check("drawing PDF exported",
+              os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0)
+    except Exception as e:
+        check("drawing page/PDF (GUI)", False, str(e))
 
     # 5. Worker thread pattern. Slots MUST be bound methods of a QObject
     # living in the main thread (like the panels' QWidget slots): a plain
@@ -115,7 +163,14 @@ try:
 
     holder = SlotHolder()  # main-thread affinity
 
+    # A stoppable timer: singleShot left the timeout armed after a
+    # successful finish, and it fired during shutdown — recording a
+    # phantom "timeout" failure after a 29/29 pass (seen 2026-10-21).
+    timeout_timer = QTimer()
+    timeout_timer.setSingleShot(True)
+
     def worker_checks():
+        timeout_timer.stop()
         check("worker ran off the main thread",
               state.get("worker_thread") != state.get("slot_thread"),
               str(state))
@@ -127,7 +182,7 @@ try:
               str(state.get("error")))
         finish()
         threads.wait_for_all(10000)
-        QApplication.instance().quit()
+        _shutdown()
 
     # (SlotHolder methods above are the slots; no plain-function versions.)
 
@@ -138,16 +193,14 @@ try:
     def on_timeout():
         check("worker completed within 30s", False, "timeout")
         finish()
-        QApplication.instance().quit()
+        _shutdown()
 
-    QTimer.singleShot(30000, on_timeout)
+    timeout_timer.timeout.connect(on_timeout)
+    timeout_timer.start(30000)
     # Return to FreeCAD's running event loop — the slots do the rest.
 
 except Exception:
     open("/tmp/guitrace.txt", "w").write(traceback.format_exc())
     print("FAIL - test script crashed; see /tmp/guitrace.txt", flush=True)
-    try:
-        from PySide6.QtWidgets import QApplication
-        QApplication.instance().quit()
-    except Exception:
-        pass
+    sys.stdout.flush()
+    os._exit(1)
