@@ -4,8 +4,9 @@ Bring a mesh in (scan, download, or AI-generated) and run the
 [mesh-to-cad](https://github.com/GruntAndMuse/mesh-to-cad) pipeline from
 inside FreeCAD. MIT licensed.
 
-**What it does (MVP):** intake with units check → quality gate → geometry
-analysis → deviation check. Four toolbar buttons, in pipeline order — the
+**What it does:** intake with units check → quality gate → geometry
+analysis → rebuild guidance → deviation check → verification report →
+STEP/STL/TechDraw export. Seven toolbar buttons, in pipeline order — the
 buttons themselves won't let you run stages out of order.
 
 **What it doesn't do:** one-click scan-to-CAD. The pipeline's honest limits
@@ -36,7 +37,10 @@ what's missing instead of failing silently.
 | Import mesh | 0 — Intake | File picker, source type (scanner / download / photogrammetry / **AI-generated**), project folder. Original copied to `input/`, never modified. Units check — the pipeline refuses to guess here, you confirm. |
 | Quality gate | 1 — Cleanup gate | Four metrics + verdict: clean, noisy, or needs-rescan. Rescan is an honest stop. |
 | Analyze mesh | 2 — Analysis | Runs in the background (dense scans take minutes). Bounding box, planar/cylindrical fractions, symmetry, and the **track decision** (prismatic / organic / mixed) with confidence. Aligned mesh shown for a visual sanity check. |
+| Rebuild guidance | 3 — Rebuild | The rebuild is manual — no magic button. This panel docks every measurement the rebuild will be verified against, what each number means while modeling, and a track-specific checklist in build order. Also written to `analysis/<name>_reference.md`. |
 | Deviation check | 3B — Deviation | Your modeled solid vs the input mesh, via CloudCompare. Max/mean/p95 + pass/fail against your tolerance. |
+| Verify build | 4 — Verification | Dimension re-check (CAD vs the Analyze measurements, per-dimension tolerance, judged on the **worst** dimension), kernel geometry check, and the recorded deviation — combined into one verdict: pass / fail / **incomplete** (a check that didn't run is never dressed up as a pass). Report written to `verification/<name>_report.md`. |
+| Export project | 5 — Output | STEP (per solid), STL, a copy of the document (FCStd), and a TechDraw drawing PDF (Front/Top/Right/Isometric) into `output/`. Anything that can't be produced is reported skipped/failed **with its reason**. |
 
 Each project lives in a folder (`input/`, `analysis/`, `cad/`, …) with a
 `manifest.json` — the same format the `mesh-to-cad` CLI writes, so CLI and
@@ -57,12 +61,20 @@ dimensions.
   explains the pattern.
 - **No hardcoded paths, anywhere.** Resolve from `__file__`, environment
   variables, or FreeCAD's own API.
+- **Framework vs app:** `meshtocad/framework/` is the generic
+  host-integration layer (guidance/verification/export planning, plus
+  `freecad_io.py`, the FreeCAD host adapter) — it knows nothing about
+  meshes or tracks and is the reusable template for future host
+  integrations. The top-level `meshtocad` modules and `commands/` are
+  the mesh-to-cad app layer on top of it.
 - **Tests:** `tests/test_engine.py` (headless, no FreeCAD),
-  `tests/test_workbench.py` (via `freecadcmd`). Run with
-  `./tests/run_tests.sh`.
+  `tests/test_workbench.py` (via `freecadcmd`), `tests/test_gui.py`
+  (FreeCAD GUI under xvfb — workbench lifecycle, all seven panels, the
+  worker-thread pattern, and the TechDraw PDF export that console mode
+  can't do). Run everything with `./tests/run_tests.sh`.
 
-## Roadmap (post-MVP)
+## Roadmap
 
-Rebuild guidance (the measure-and-remodel reference panel), verification
-report, and STEP/STL/TechDraw export — the stages the MVP deliberately
-leaves manual.
+Post-MVP stages shipped in 0.2.0: rebuild guidance, verification
+report, STEP/STL/TechDraw export. Still manual by design: the rebuild
+itself (guided, not automated) and the organic surface-fitting loop.
