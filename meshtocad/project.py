@@ -17,7 +17,11 @@ from pathlib import Path
 
 SOURCE_TYPES = ("scanner", "download", "photogrammetry", "ai-generated")
 PROJECT_SUBDIRS = ("input", "work", "analysis", "cad", "verification", "output")
-STAGES = ("import", "quality", "analyze", "deviation")
+# Pipeline order. Post-MVP stages (rebuild/verify/export) were appended in
+# 0.2.0 — manifests written by 0.1.0 lack those keys, which stage_done()
+# already reads as False, so old projects open unchanged.
+STAGES = ("import", "quality", "analyze", "rebuild", "deviation",
+          "verify", "export")
 
 
 def default_projects_dir() -> Path:
