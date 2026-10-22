@@ -28,6 +28,7 @@ def require_project(panel_set_results) -> dict | None:
         panel_set_results([
             "No project yet — run Import mesh first.",
             "The pipeline runs in order: Import \u2192 Quality \u2192 "
-            "Analyze \u2192 Deviation.",
+            "Analyze \u2192 Rebuild \u2192 Deviation \u2192 Verify \u2192 "
+            "Export.",
         ])
     return manifest

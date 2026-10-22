@@ -77,7 +77,8 @@ class DeviationPanel(StagePanel):
     title = "Deviation check"
     one_liner = ("How far is your model from the input mesh? "
                  "Needs CloudCompare (free) — see below if it's missing.")
-    # No next step in the MVP: deviation is the last stage.
+    next_label = "Continue \u2192 Verify build"
+    next_command = "MTC_Verify"
 
     def build_inputs(self):
         self.cc_bin = deps.find_cloudcompare()
@@ -207,6 +208,7 @@ class DeviationPanel(StagePanel):
                       "Remember: this checks your CAD against the AI mesh — "
                       "\"matches the AI mesh,\" not \"matches reality.\""]
         self.set_results(lines)
+        self.enable_next()
 
 
 class Command:

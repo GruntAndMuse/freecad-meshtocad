@@ -2,8 +2,8 @@
 """The MeshToCAD workbench class.
 
 Toolbar order enforces the pipeline: Import -> Quality -> Analyze ->
-Deviation. Each command's IsActive() gates on the manifest, so the buttons
-themselves teach the order.
+Rebuild -> Deviation -> Verify -> Export. Each command's IsActive()
+gates on the manifest, so the buttons themselves teach the order.
 
 On first activation, runs the dependency check: trimesh missing ->
 guided-install dialog (never silent, never a traceback); CloudCompare
@@ -20,7 +20,8 @@ from . import deps
 class MeshToCADWorkbench(FreeCADGui.Workbench):
     MenuText = "MeshToCAD"
     ToolTip = ("Mesh to CAD pipeline: import, quality gate, analyze, "
-               "deviation check. No magic scan-to-CAD button.")
+               "rebuild guidance, deviation check, verification report, "
+               "export. No magic scan-to-CAD button.")
     Icon = os.path.normpath(os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "..", "Resources", "icons", "workbench.svg"))
