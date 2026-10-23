@@ -165,6 +165,34 @@ def main():
             check("guidance reference has checklist + numbers",
                   "## Rebuild checklist" in ref_text
                   and "Overall width (X)" in ref_text)
+            # Analyze's full record reaches the reference: the hole
+            # assessment status always renders; the box's planes carry
+            # cylindrical detail entries.
+            check("guidance reference has hole-assessment section",
+                  "## Holes and openings" in ref_text)
+            check("guidance reference has cylindrical section",
+                  "## Cylindrical walls and bores" in ref_text)
+            check("guidance: no deviation on record yet",
+                  ref.get("deviation") is None
+                  and "## Last deviation check" not in ref_text)
+            # With a deviation check on record, guidance surfaces it —
+            # the iteration-pass case.
+            manifest["deviation"] = {"max_mm": 0.2, "mean_mm": 0.05,
+                                      "p95_mm": 0.15, "tolerance_mm": 0.3,
+                                      "passed": True}
+            project.save_manifest(manifest["project_dir"], manifest)
+            ref2 = guidance.build_reference(manifest["project_dir"])
+            check("guidance rebuilt with deviation on record",
+                  ref2["error"] is None, str(ref2["error"]))
+            if ref2["error"] is None:
+                ref2_text = Path(ref2["reference_path"]).read_text(
+                    encoding="utf-8")
+                check("guidance reference shows deviation summary",
+                      "## Last deviation check" in ref2_text
+                      and "max 0.2 mm" in ref2_text
+                      and "PASS" in ref2_text)
+                check("guidance result carries the deviation record",
+                      ref2["deviation"]["passed"] is True)
             project.mark_stage(manifest, "rebuild", True)
 
         # A real CAD solid with exactly the measured extents.

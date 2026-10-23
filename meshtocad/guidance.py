@@ -134,6 +134,93 @@ def planes_section(measurements: dict) -> tuple:
     return ("Dominant planes", lines)
 
 
+def cylinders_section(measurements: dict) -> tuple | None:
+    """(heading, lines) for the cylindrical walls/bores Analyze found.
+
+    cylindrical_detail is per dominant plane: faces forming extruded
+    walls or bores perpendicular to that plane. The aggregate
+    cylindrical_fraction field already shows the share; this section
+    says WHERE those faces live, which is what the modeler acts on.
+    None when Analyze recorded no qualifying plane.
+    """
+    detail = measurements.get("cylindrical_detail") or []
+    lines = []
+    for d in detail:
+        n = d.get("plane_normal", ["?", "?", "?"])
+        wrap = ("wraps the full circumference"
+                if d.get("full_coverage") else "partial wrap")
+        lines.append(
+            f"- Walls/bores perpendicular to plane normal "
+            f"({n[0]}, {n[1]}, {n[2]}): {d.get('side_faces', '?')} faces, "
+            f"{wrap}. Model as holes / revolves on that axis, not as "
+            "organic detail.")
+    if not lines:
+        return None
+    return ("Cylindrical walls and bores", lines)
+
+
+def holes_section(measurements: dict) -> tuple | None:
+    """(heading, lines) for Analyze's hole-assessment status.
+
+    NOT a list of detected holes — analyze.py is explicit that this
+    record is a status, not a detection: watertight meshes have no
+    boundary loops to find (internal through-holes are not detected
+    by this stage), and for open meshes it carries section-segment
+    counts, a coarse complexity signal. The reference repeats
+    Analyze's own detail text so the modeler is never told a hole
+    count the pipeline didn't measure. None when the record is
+    absent (measurements from an older Analyze).
+    """
+    det = measurements.get("hole_detection")
+    if not isinstance(det, dict):
+        return None
+    status = det.get("status", "?")
+    lines = [f"- Status: {status} — {det.get('detail', '')}"]
+    if status == "ok" and det.get("section_segments_xyz"):
+        segs = det["section_segments_xyz"]
+        lines.append(
+            "- Section segments through the centroid — X: "
+            f"{segs[0]}, Y: {segs[1]}, Z: {segs[2]}. More disjoint "
+            "segments = more internal structure on that plane; "
+            "section the mesh there and account for every loop "
+            "before modeling.")
+    elif status == "failed":
+        lines.append(
+            "- Do not assume 'no holes': section the mesh manually "
+            "and inspect before modeling.")
+    elif status == "not-applicable":
+        lines.append(
+            "- The mesh being watertight does not rule out internal "
+            "through-holes — if the part should have bores, check "
+            "for them manually (the cylindrical section above is "
+            "the evidence this stage leaves).")
+    return ("Holes and openings — assessment status", lines)
+
+
+def deviation_section(manifest: dict) -> tuple | None:
+    """(heading, lines) summarizing the recorded deviation check.
+
+    Guidance runs before Deviation on a first pass, so this section
+    exists only when a check is already on record (iteration passes)
+    — the same numbers Verify will judge, shown where the modeler
+    works. Absent record = no section, never a placeholder verdict.
+    """
+    dev = manifest.get("deviation")
+    if not isinstance(dev, dict) or "max_mm" not in dev:
+        return None
+    verdict = "PASS" if dev.get("passed") else "FAIL"
+    lines = [
+        f"- Last recorded check: max {dev['max_mm']} mm, "
+        f"mean {dev.get('mean_mm', '?')} mm, "
+        f"p95 {dev.get('p95_mm', '?')} mm against a "
+        f"{dev.get('tolerance_mm', '?')} mm tolerance — {verdict}.",
+        "- That is where the solid stood at the last check. Re-run "
+        "Deviation check after further modeling before trusting it "
+        "again.",
+    ]
+    return ("Last deviation check", lines)
+
+
 def symmetry_lines(measurements: dict) -> list:
     sym = measurements.get("symmetry") or {}
     lines = []
@@ -202,9 +289,16 @@ def build_reference(project_dir: str) -> dict:
     spec = spec_for_track(track)
     rows = build_reference_rows(measurements, spec.fields)
     extra = [planes_section(measurements)]
+    for section in (cylinders_section(measurements),
+                    holes_section(measurements)):
+        if section is not None:
+            extra.append(section)
     sym = symmetry_lines(measurements)
     if sym:
         extra.append(("Symmetry", sym))
+    dev = deviation_section(manifest)
+    if dev is not None:
+        extra.append(dev)
     markdown = render_reference_markdown(
         f"Rebuild reference — {manifest['project']}",
         intro_lines(manifest, measurements),
@@ -217,4 +311,5 @@ def build_reference(project_dir: str) -> dict:
         return {"error": f"couldn't write the reference file: {e}"}
     return {"error": None, "rows": rows, "track": track,
             "reference_path": str(out),
-            "cad_files": cad_dir_listing(manifest)}
+            "cad_files": cad_dir_listing(manifest),
+            "deviation": manifest.get("deviation")}

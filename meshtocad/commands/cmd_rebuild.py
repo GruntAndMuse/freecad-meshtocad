@@ -70,6 +70,18 @@ class RebuildPanel(StagePanel):
         for r in result["rows"]:
             value = r["value_text"] + (f" {r['unit']}" if r["unit"] else "")
             lines.append(f"{r['label']}: {value}")
+        dev = result.get("deviation")
+        if isinstance(dev, dict) and "max_mm" in dev:
+            verdict = "PASS \u2713" if dev.get("passed") else "FAIL \u2717"
+            lines += [
+                "",
+                f"Last deviation check: max {dev['max_mm']} mm, "
+                f"mean {dev.get('mean_mm', '?')} mm, "
+                f"p95 {dev.get('p95_mm', '?')} mm \u2014 {verdict} vs "
+                f"{dev.get('tolerance_mm', '?')} mm tolerance.",
+                "Re-run Deviation check after further modeling "
+                "before trusting that result again.",
+            ]
         lines += ["",
                   f"Full reference (with the build checklist): "
                   f"analysis/{Path(result['reference_path']).name}"]

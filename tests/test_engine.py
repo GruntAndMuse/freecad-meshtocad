@@ -99,6 +99,51 @@ def test_framework_guidance_rows():
     print("  guidance rows + markdown ok")
 
 
+def test_app_guidance_sections():
+    from meshtocad import guidance
+
+    # Cylindrical detail: where the walls/bores live, per dominant plane.
+    m = {"cylindrical_detail": [
+        {"plane_normal": [0, 0, 1], "side_faces": 42, "full_coverage": True},
+        {"plane_normal": [1, 0, 0], "side_faces": 7, "full_coverage": False},
+    ]}
+    sec = guidance.cylinders_section(m)
+    assert sec is not None and sec[0] == "Cylindrical walls and bores"
+    assert "42 faces" in sec[1][0] and "full circumference" in sec[1][0]
+    assert "partial wrap" in sec[1][1]
+    assert guidance.cylinders_section({}) is None
+    assert guidance.cylinders_section({"cylindrical_detail": []}) is None
+
+    # Hole assessment is a STATUS record, never a hole count — the
+    # section must carry Analyze's own detail and invent nothing.
+    det = {"status": "not-applicable",
+           "detail": "watertight — no boundary loops to find."}
+    sec = guidance.holes_section({"hole_detection": det})
+    assert sec is not None and "not-applicable" in sec[1][0]
+    assert "no boundary loops" in sec[1][0]
+    det2 = {"status": "ok",
+            "detail": "mesh is open; section-segment counts",
+            "section_segments_xyz": [12, 4, 30]}
+    sec = guidance.holes_section({"hole_detection": det2})
+    assert "X: 12" in sec[1][1] and "Z: 30" in sec[1][1]
+    det3 = {"status": "failed", "detail": "section analysis raised",
+            "error": "boom"}
+    sec = guidance.holes_section({"hole_detection": det3})
+    assert "Do not assume" in sec[1][1]
+    assert guidance.holes_section({}) is None
+    assert guidance.holes_section({"hole_detection": "junk"}) is None
+
+    # Deviation summary: only when a check is actually on record.
+    assert guidance.deviation_section({}) is None
+    assert guidance.deviation_section({"deviation": {"passed": True}}) is None
+    mf = {"deviation": {"max_mm": 0.42, "mean_mm": 0.1, "p95_mm": 0.3,
+                        "tolerance_mm": 0.3, "passed": False}}
+    sec = guidance.deviation_section(mf)
+    assert sec is not None and sec[0] == "Last deviation check"
+    assert "max 0.42 mm" in sec[1][0] and "FAIL" in sec[1][0]
+    print("  guidance sections (cylinders / holes-status / deviation) ok")
+
+
 def test_framework_verification_verdicts():
     from meshtocad.framework import verification as fw
 
@@ -196,6 +241,7 @@ TESTS = [
     test_analyze_blob_is_organic,
     test_deviation_module_loads,
     test_framework_guidance_rows,
+    test_app_guidance_sections,
     test_framework_verification_verdicts,
     test_app_verification_end_to_end_pure,
     test_framework_export_plan,
